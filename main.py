@@ -1,40 +1,52 @@
 import argparse
 import os
 import numpy as np
-import math
 import itertools
 
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
 import torch.nn as nn
-import torch.nn.functional as F
 import torch
 
-from data import *
+from load_compas_data import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=1000, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.001, help="adam: learning rate")
-parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--n_cpu", type=int, default=4, help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=10, help="dimensionality of the latent code")
-parser.add_argument("--data", type=str, default='compas', help="the dataset you want to import")
+parser.add_argument("--n_epochs", type=int, default=1000,
+                    help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=64,
+                    help="size of the batches")
+parser.add_argument("--lr", type=float, default=0.001,
+                    help="adam: learning rate")
+parser.add_argument("--b1", type=float, default=0.5,
+                    help="adam: decay of first order momentum of gradient")
+parser.add_argument("--b2", type=float, default=0.999,
+                    help="adam: decay of first order momentum of gradient")
+parser.add_argument("--n_cpu", type=int, default=4,
+                    help="number of cpu threads to use during batch generation")
+parser.add_argument("--latent_dim", type=int, default=10,
+                    help="dimensionality of the latent code")
+
 opt = parser.parse_args()
 print(opt)
 
-data = get_data(opt.data)
+X, y, x_control = load_compas_data()
 
-input_shape = data.shape
+X = np.c_[X, x_control['race']]
+
+X = torch.from_numpy(X)
+x_control = torch.from_numpy(x_control['race'])
+y = torch.from_numpy(y)
+
+input_shape = X.shape
 
 cuda = True if torch.cuda.is_available() else False
 
 
 def reparameterization(mu, logvar):
     std = torch.exp(logvar / 2)
-    sampled_z = Variable(Tensor(np.random.normal(0, 1, (mu.size(0), opt.latent_dim))))
+    sampled_z = Variable(
+        Tensor(np.random.normal(0, 1, (mu.size(0), opt.latent_dim))))
     z = sampled_z * std + mu
     return z
 
@@ -44,10 +56,10 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(int(np.prod(img_shape)), 512),
+            nn.Linear(int(np.prod(input_shape)), 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(8, 8),
+            nn.BatchNorm1d(8),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
@@ -68,12 +80,12 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 512),
+            nn.Linear(opt.latent_dim, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, int(np.prod(img_shape))),
+            nn.Linear(8, 8),
+            nn.BatchNorm1d(8),
+            nn.LeakyReLU(0.2, inplace=input_shape),
+            nn.Linear(8, int(np.prod(input_shape))),
             nn.Tanh(),
         )
 
@@ -88,11 +100,11 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 512),
+            nn.Linear(opt.latent_dim, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
+            nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 1),
+            nn.Linear(8, 1),
             nn.Sigmoid(),
         )
 
@@ -103,7 +115,7 @@ class Discriminator(nn.Module):
 
 # Use binary cross-entropy loss
 adversarial_loss = torch.nn.BCELoss()
-pixelwise_loss = torch.nn.L1Loss()
+l1_loss = torch.nn.L1Loss()
 
 # Initialize generator and discriminator
 encoder = Encoder()
@@ -115,19 +127,11 @@ if cuda:
     decoder.cuda()
     discriminator.cuda()
     adversarial_loss.cuda()
-    pixelwise_loss.cuda()
+    l1_loss.cuda()
 
 # Configure data loader
-os.makedirs("../../data/mnist", exist_ok=True)
-dataloader = torch.utils.data.DataLoader(
-    datasets.MNIST(
-        "../../data/mnist",
-        train=True,
-        download=True,
-        transform=transforms.Compose(
-            [transforms.Resize(opt.img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
-        ),
-    ),
+dataloader = DataLoader(
+    data,
     batch_size=opt.batch_size,
     shuffle=True,
 )
@@ -136,17 +140,10 @@ dataloader = torch.utils.data.DataLoader(
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2)
 )
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_D = torch.optim.Adam(
+    discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
-
-def sample_image(n_row, batches_done):
-    """Saves a grid of generated digits"""
-    # Sample noise
-    z = Variable(Tensor(np.random.normal(0, 1, (n_row ** 2, opt.latent_dim))))
-    gen_imgs = decoder(z)
-    save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=n_row, normalize=True)
 
 
 # ----------
@@ -157,8 +154,10 @@ for epoch in range(opt.n_epochs):
     for i, (imgs, _) in enumerate(dataloader):
 
         # Adversarial ground truths
-        valid = Variable(Tensor(imgs.shape[0], 1).fill_(1.0), requires_grad=False)
-        fake = Variable(Tensor(imgs.shape[0], 1).fill_(0.0), requires_grad=False)
+        valid = Variable(Tensor(imgs.shape[0], 1).fill_(
+            1.0), requires_grad=False)
+        fake = Variable(Tensor(imgs.shape[0], 1).fill_(
+            0.0), requires_grad=False)
 
         # Configure input
         real_imgs = Variable(imgs.type(Tensor))
@@ -173,7 +172,7 @@ for epoch in range(opt.n_epochs):
         decoded_imgs = decoder(encoded_imgs)
 
         # Loss measures generator's ability to fool the discriminator
-        g_loss = 0.001 * adversarial_loss(discriminator(encoded_imgs), valid) + 0.999 * pixelwise_loss(
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded_imgs), valid) + 0.999 * l1_loss(
             decoded_imgs, real_imgs
         )
 
@@ -187,11 +186,13 @@ for epoch in range(opt.n_epochs):
         optimizer_D.zero_grad()
 
         # Sample noise as discriminator ground truth
-        z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
+        z = Variable(Tensor(np.random.normal(
+            0, 1, (imgs.shape[0], opt.latent_dim))))
 
         # Measure discriminator's ability to classify real from generated samples
         real_loss = adversarial_loss(discriminator(z), valid)
-        fake_loss = adversarial_loss(discriminator(encoded_imgs.detach()), fake)
+        fake_loss = adversarial_loss(
+            discriminator(encoded_imgs.detach()), fake)
         d_loss = 0.5 * (real_loss + fake_loss)
 
         d_loss.backward()
@@ -201,7 +202,3 @@ for epoch in range(opt.n_epochs):
             "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
             % (epoch, opt.n_epochs, i, len(dataloader), d_loss.item(), g_loss.item())
         )
-
-        batches_done = epoch * len(dataloader) + i
-        if batches_done % opt.sample_interval == 0:
-            sample_image(n_row=10, batches_done=batches_done)
