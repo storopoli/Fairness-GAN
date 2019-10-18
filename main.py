@@ -49,13 +49,13 @@ cuda = True if torch.cuda.is_available() else False
 
 
 class DatasetCompas(Dataset):
-    def _init_(self, ds):
+    def __init__(self, ds):
         self.data = ds
 
-    def _len_(self):
+    def __len__(self):
         return len(self.data)
 
-    def _getitem_(self, index):
+    def __getitem__(self, index):
         data = self.data.iloc[index, 0:-1]
         sensible = self.data.iloc[index, -2]
         label = self.data.iloc[index, -1]
