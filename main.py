@@ -182,7 +182,7 @@ for epoch in range(opt.n_epochs):
         gen_examples = generator(data.float().cuda())
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, data.float())
+        g_loss = MSE_loss(gen_examples, data.float().cuda())
         g_loss.backward()
 
         # ---------------------
@@ -192,10 +192,10 @@ for epoch in range(opt.n_epochs):
         optimizer_C.zero_grad()
 
         # Classify a batch of examples
-        cla_examples = classifier(data.float())
+        cla_examples = classifier(data.float().cuda())
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        c_loss = BCE_loss(cla_examples, label.float())
+        c_loss = BCE_loss(cla_examples, label.float().cuda())
 
         c_loss.backward(retain_graph=True)
         optimizer_C.step()
@@ -215,10 +215,10 @@ for epoch in range(opt.n_epochs):
         optimizer_D.zero_grad()
 
         # Discriminate a batch of examples
-        dis_examples = discriminator(data.float())
+        dis_examples = discriminator(data.float().cuda())
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        d_loss = BCE_loss(dis_examples, sensible.float())
+        d_loss = BCE_loss(dis_examples, sensible.float().cuda())
 
         d_loss.backward(retain_graph=True)
         optimizer_D.step()
