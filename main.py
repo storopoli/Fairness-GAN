@@ -179,10 +179,10 @@ for epoch in range(opt.n_epochs):
         optimizer_G.zero_grad()
 
         # Generate a batch of examples
-        gen_examples = generator(data.float())
+        gen_examples = generator(data.float().cuda())
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, data.float().cuda())
+        g_loss = MSE_loss(gen_examples, data.float())
         g_loss.backward()
 
         # ---------------------
