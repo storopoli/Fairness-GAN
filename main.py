@@ -182,7 +182,7 @@ for epoch in range(opt.n_epochs):
         gen_examples = generator(data.float())
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, data.float())
+        g_loss = MSE_loss(gen_examples, data.float().cuda())
         g_loss.backward()
 
         # ---------------------
