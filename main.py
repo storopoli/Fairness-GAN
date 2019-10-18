@@ -45,12 +45,6 @@ input_shape = X.shape[1]
 
 cuda = True if torch.cuda.is_available() else False
 
-if cuda:
-    X = X.to(torch.device('cuda'))
-    Y = Y.to(torch.device('cuda'))
-    A = A.to(torch.device('cuda'))
-
-
 dataloader = torch.utils.data.DataLoader(
     X,
     batch_size=opt.batch_size,
