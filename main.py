@@ -42,9 +42,6 @@ ds = np.c_[X, A['race'], Y]
 # X are ['age_cat_25 - 45', 'age_cat_Greater than 45', 'age_cat_Less than 25', 'race', 'sex', 'priors_count', 'c_charge_degree']
 # A is 'race' 0 White; 1 Black
 
-
-input_shape = ds.shape[1]
-
 cuda = True if torch.cuda.is_available() else False
 
 
@@ -56,10 +53,11 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        data = self.data.iloc[index, 0:-1]
-        sensible = self.data.iloc[index, -2]
-        label = self.data.iloc[index, -1]
-        return data, sensible, label
+        data = self.data
+        sensible = self.data[:, -2]
+        label = self.data[:, -1]
+        sample = {'data': data, 'sensible': sensible, 'label': label}
+        return sample
 
 
 train_dataset = DatasetCompas(ds)
@@ -68,16 +66,17 @@ dataloader = DataLoader(
     train_dataset,
     batch_size=opt.batch_size,
     shuffle=True,
-    num_workers=opt.n_cpu
+    num_workers=opt.n_cpu,
+    pin_memory=True
 )
 
+input_shape = ds.shape[1]
 
-def reparameterization(mu, logvar):  # insert random gaussian noise into tensor
-    std = torch.exp(logvar / 2)
-    sampled_z = Variable(
-        Tensor(np.random.normal(0, 1, (mu.size(0), opt.latent_dim))))
-    z = sampled_z * std + mu
-    return z
+
+# Input Gaussian noise
+def gaussian(ins, mean=0, stddev=0.05):
+    noise = Variable(ins.data.new(ins.size()).normal_(mean, stddev))
+    return ins + noise
 
 
 class Generator(nn.Module):
@@ -89,18 +88,15 @@ class Generator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(9, 9),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, input_shape)
+            nn.Linear(9, opt.latent_dim)
         )
 
-        self.mu = nn.Linear(9, opt.latent_dim)
-        self.logvar = nn.Linear(9, opt.latent_dim)
+    # Inserting Random Gaussian Noise
+    def forward(self, x, mean=0, stddev=0.05):
+        z = self.model(x)
+        return gaussian(z)
 
-    def forward(self, x):
-        x = self.model(x)
-        mu = self.mu(x)
-        logvar = self.logvar(x)
-        z = reparameterization(mu, logvar)
-        return z
+
 
 
 class Classifier(nn.Module):
@@ -172,6 +168,9 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 for epoch in range(opt.n_epochs):
     start_time = time.time()
     for i, batch in enumerate(dataloader):
+        data = batch['data']
+        sensible = batch['sensible']
+        label = batch['label']
 
         # -----------------
         #  Train Generator
@@ -179,14 +178,12 @@ for epoch in range(opt.n_epochs):
 
         optimizer_G.zero_grad()
 
-        # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (batch.shape[0], opt.latent_dim))))
-
         # Generate a batch of examples
-        gen_examples = generator(z)
+        gen_examples = generator(data.float())
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, valid)
+        g_loss = MSE_loss(gen_examples, data.float())
+        g_loss.backward()
 
         # ---------------------
         #  Train Classifier
@@ -194,16 +191,20 @@ for epoch in range(opt.n_epochs):
 
         optimizer_C.zero_grad()
 
-        # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        c_loss = BCE_loss(Y, Y_hat)
+        # Classify a batch of examples
+        cla_examples = classifier(data.float())
 
-        c_loss.backward()
+        # Measure classifier's ability to classify real Y from generated samples' Y_hat
+        c_loss = BCE_loss(cla_examples, label.float())
+
+        c_loss.backward(retain_graph=True)
         optimizer_C.step()
 
         # ---------------------
-        #  Update Generator with error from G and C
+        #  Update Generator with error from C
         # ---------------------
-        g_loss = g_loss + c_loss
+        optimizer_G.zero_grad()
+        g_loss = c_loss
         g_loss.backward()
         optimizer_G.step()
 
@@ -213,11 +214,22 @@ for epoch in range(opt.n_epochs):
 
         optimizer_D.zero_grad()
 
-        # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        d_loss = BCE_loss(A, A_hat)
+        # Discriminate a batch of examples
+        dis_examples = discriminator(data.float())
 
-        d_loss.backward()
+        # Measure discriminator's ability to discrimante real A from generated samples' A_hat
+        d_loss = BCE_loss(dis_examples, sensible.float())
+
+        d_loss.backward(retain_graph=True)
         optimizer_D.step()
+
+        # ---------------------
+        #  Update Generator with error from D
+        # ---------------------
+        optimizer_G.zero_grad()
+        g_loss = -d_loss  # we want to fool the Discriminator
+        g_loss.backward()
+        optimizer_G.step()
 
         # Time it
         end_time = time.time()
