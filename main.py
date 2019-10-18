@@ -168,9 +168,15 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 for epoch in range(opt.n_epochs):
     start_time = time.time()
     for i, batch in enumerate(dataloader):
-        data = batch['data']
-        sensible = batch['sensible']
-        label = batch['label']
+        data = batch['data'].float()
+        sensible = batch['sensible'].float()
+        label = batch['label'].float()
+
+        if cuda:
+            data = data.cuda()
+            sensible = sensible.cuda()
+            label = label.cuda()
+
 
         # -----------------
         #  Train Generator
@@ -179,10 +185,10 @@ for epoch in range(opt.n_epochs):
         optimizer_G.zero_grad()
 
         # Generate a batch of examples
-        gen_examples = generator(data.float().cuda())
+        gen_examples = generator(data)
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, data.float().cuda())
+        g_loss = MSE_loss(gen_examples, data)
         g_loss.backward()
 
         # ---------------------
@@ -192,10 +198,10 @@ for epoch in range(opt.n_epochs):
         optimizer_C.zero_grad()
 
         # Classify a batch of examples
-        cla_examples = classifier(data.float().cuda())
+        cla_examples = classifier(data)
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        c_loss = BCE_loss(cla_examples, label.float().cuda())
+        c_loss = BCE_loss(cla_examples, label)
 
         c_loss.backward(retain_graph=True)
         optimizer_C.step()
@@ -215,10 +221,10 @@ for epoch in range(opt.n_epochs):
         optimizer_D.zero_grad()
 
         # Discriminate a batch of examples
-        dis_examples = discriminator(data.float().cuda())
+        dis_examples = discriminator(data)
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        d_loss = BCE_loss(dis_examples, sensible.float().cuda())
+        d_loss = -BCE_loss(dis_examples, sensible)
 
         d_loss.backward(retain_graph=True)
         optimizer_D.step()
@@ -227,7 +233,7 @@ for epoch in range(opt.n_epochs):
         #  Update Generator with error from D
         # ---------------------
         optimizer_G.zero_grad()
-        g_loss = -d_loss  # we want to fool the Discriminator
+        g_loss = d_loss  # we want to fool the Discriminator
         g_loss.backward()
         optimizer_G.step()
 
