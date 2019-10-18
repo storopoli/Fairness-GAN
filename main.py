@@ -224,7 +224,7 @@ for epoch in range(opt.n_epochs):
         dis_examples = discriminator(data)
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        d_loss = -BCE_loss(dis_examples, sensible)
+        d_loss = BCE_loss(dis_examples, sensible)
 
         d_loss.backward(retain_graph=True)
         optimizer_D.step()
