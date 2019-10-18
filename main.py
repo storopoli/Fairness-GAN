@@ -63,12 +63,11 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        self.mu = nn.Linear(512, opt.latent_dim)
-        self.logvar = nn.Linear(512, opt.latent_dim)
+        self.mu = nn.Linear(8, opt.latent_dim)
+        self.logvar = nn.Linear(8, opt.latent_dim)
 
-    def forward(self, img):
-        img_flat = img.view(img.shape[0], -1)
-        x = self.model(img_flat)
+    def forward(self, input):
+        x = self.model(input)
         mu = self.mu(x)
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar)
@@ -89,10 +88,9 @@ class Decoder(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, z):
-        img_flat = self.model(z)
-        img = img_flat.view(img_flat.shape[0], *img_shape)
-        return img
+    def forward(self, input):
+        g = self.model(input)
+        return g
 
 
 class Discriminator(nn.Module):
@@ -108,8 +106,8 @@ class Discriminator(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, z):
-        validity = self.model(z)
+    def forward(self, input):
+        validity = self.model(input)
         return validity
 
 
@@ -151,16 +149,16 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 # ----------
 
 for epoch in range(opt.n_epochs):
-    for i, (imgs, _) in enumerate(dataloader):
+    for i, (examples, _) in enumerate(dataloader):
 
         # Adversarial ground truths
-        valid = Variable(Tensor(imgs.shape[0], 1).fill_(
+        valid = Variable(Tensor(examples.shape[0], 1).fill_(
             1.0), requires_grad=False)
-        fake = Variable(Tensor(imgs.shape[0], 1).fill_(
+        fake = Variable(Tensor(examples.shape[0], 1).fill_(
             0.0), requires_grad=False)
 
         # Configure input
-        real_imgs = Variable(imgs.type(Tensor))
+        real_examples = Variable(examples.type(Tensor))
 
         # -----------------
         #  Train Generator
@@ -168,12 +166,12 @@ for epoch in range(opt.n_epochs):
 
         optimizer_G.zero_grad()
 
-        encoded_imgs = encoder(real_imgs)
-        decoded_imgs = decoder(encoded_imgs)
+        encoded_examples = encoder(real_examples)
+        decoded_examples = decoder(encoded_examples)
 
         # Loss measures generator's ability to fool the discriminator
-        g_loss = 0.001 * adversarial_loss(discriminator(encoded_imgs), valid) + 0.999 * l1_loss(
-            decoded_imgs, real_imgs
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded_examples), valid) + 0.999 * l1_loss(
+            decoded_examples, real_examples
         )
 
         g_loss.backward()
@@ -187,12 +185,12 @@ for epoch in range(opt.n_epochs):
 
         # Sample noise as discriminator ground truth
         z = Variable(Tensor(np.random.normal(
-            0, 1, (imgs.shape[0], opt.latent_dim))))
+            0, 1, (examples.shape[0], opt.latent_dim))))
 
         # Measure discriminator's ability to classify real from generated samples
         real_loss = adversarial_loss(discriminator(z), valid)
         fake_loss = adversarial_loss(
-            discriminator(encoded_imgs.detach()), fake)
+            discriminator(encoded_examples.detach()), fake)
         d_loss = 0.5 * (real_loss + fake_loss)
 
         d_loss.backward()
