@@ -146,8 +146,8 @@ discriminator = Discriminator()
 
 if cuda:
     generator.cuda()
-    discriminator_1.cuda()
-    discriminator_2.cuda()
+    classifier.cuda()
+    discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
 
