@@ -79,11 +79,6 @@ dataloader = DataLoader(
 print('# training samples:', len(train_dataset))
 print('# batches:', len(dataloader))
 
-# Input Gaussian noise
-# def gaussian(ins, mean=0, stddev=0.05):
-#     noise = Variable(ins.data.new(ins.size()).normal_(mean, stddev))
-#     return ins + noise
-
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -297,21 +292,22 @@ for epoch in range(opt.n_epochs):
         correct_dis = 0
         total_dis = 0
         with torch.no_grad():
-            for data in train_dataset:
-                Xs, Zs, Ys = data
-                if cuda:
-                    Xs.cuda()
-                    Zs.cuda()
-                    Ys.cuda()
-                ouputs_enc = encoder(Xs)
-                outputs_cla = classifier(ouputs_enc)
-                _, predicted_cla = torch.max(outputs_cla.data, 1)
-                total_cla += Ys.size(0)
-                correct_cla += (predicted_cla == Ys).sum().item()
-                outputs_dis = discriminator(ouputs_enc)
-                _, predicted_dis = torch.max(outputs_dis.data, 1)
-                total_dis += Zs.size(0)
-                correct_dis += (predicted_dis == Zs).sum().item()
+            Xs = train_dataset['data'].float()
+            Zs = train_dataset['sensible'].float()
+            Ys = train_dataset['label'].float()
+            if cuda:
+                Xs.cuda()
+                Zs.cuda()
+                Ys.cuda()
+            ouputs_enc = encoder(Xs)
+            outputs_cla = classifier(ouputs_enc)
+            _, predicted_cla = torch.max(outputs_cla.data, 1)
+            total_cla += Ys.size(0)
+            correct_cla += (predicted_cla == Ys).sum().item()
+            outputs_dis = discriminator(ouputs_enc)
+            _, predicted_dis = torch.max(outputs_dis.data, 1)
+            total_dis += Zs.size(0)
+            correct_dis += (predicted_dis == Zs).sum().item()
 
         print('Accuracy of the Classifier: %d %%' % (100 * correct_cla / total_cla))
         print('Accuracy of the Discriminator: %d %%' % (100 * correct_dis / total_dis))
