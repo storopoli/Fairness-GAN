@@ -291,13 +291,16 @@ for epoch in range(opt.n_epochs):
             % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
         )
 
-    if epoch % 100 == 0:  # for every 100 hundred epochs
-        acc = Accuracy(y_hat, y).compute()
-        roc = ROC_AUC(torch.sigmoid(z_hat, z)).compute()
-        print(
-            "[Epoch %d/%d] [acc: %f] [roc: %f]"
-            % (epoch, opt.n_epochs, acc, roc)
-        )
+    if epoch % 100 == 0:
+        if epoch == 0:
+            pass
+        else:  # for every 100 hundred epochs
+            acc = Accuracy(y_hat, y).compute()
+            roc = ROC_AUC(torch.sigmoid(z_hat, z)).compute()
+            print(
+                "[Epoch %d/%d] [acc: %f] [roc: %f]"
+                % (epoch, opt.n_epochs, acc, roc)
+            )
 
 torch.save({
     'Encoder': encoder.state_dict(),
