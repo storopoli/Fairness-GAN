@@ -291,16 +291,26 @@ for epoch in range(opt.n_epochs):
             % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
         )
 
-    if epoch % 100 == 0:
-        if epoch == 0:
-            pass
-        else:  # for every 100 hundred epochs
-            acc = Accuracy(y_hat, y).compute()
-            roc = ROC_AUC(torch.sigmoid(z_hat, z)).compute()
-            print(
-                "[Epoch %d/%d] [acc: %f] [roc: %f]"
-                % (epoch, opt.n_epochs, acc, roc)
-            )
+    if epoch % 100 == 0:  # for every 100 hundred epochs
+        correct_cla = 0
+        total_cla = 0
+        correct_dis = 0
+        total_dis = 0
+        with torch.no_grad():
+            for data in testloader:
+                Xs, Zs, Ys = data
+                ouputs_enc = encoder(Xs)
+                outputs_cla = classifier(ouputs_enc)
+                _, predicted_cla = torch.max(outputs_cla.data, 1)
+                total_cla += Ys.size(0)
+                correct_cla += (predicted_cla == Ys).sum().item()
+                outputs_dis = discriminator(ouputs_enc)
+                _, predicted_dis = torch.max(outputs_dis.data, 1)
+                total_dis += Zs.size(0)
+                correct_dis += (predicted_dis == Zs).sum().item()
+
+        print('Accuracy of the Classifier: %d %%' % (100 * correct_cla / total_cla))
+        print('Accuracy of the Discriminator: %d %%' % (100 * correct_dis / total_dis))
 
 torch.save({
     'Encoder': encoder.state_dict(),
