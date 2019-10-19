@@ -269,6 +269,9 @@ for epoch in range(opt.n_epochs):
 
         optimizer_Dis.zero_grad()
 
+        if cuda:
+            x_tilde.cuda()
+
         # Classify a batch of examples
         y_hat = classifier(x_tilde).detach()
 
@@ -281,6 +284,7 @@ for epoch in range(opt.n_epochs):
             z_hat.cuda()
             z.cuda()
             lambdas.cuda()
+
         dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
