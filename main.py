@@ -297,8 +297,12 @@ for epoch in range(opt.n_epochs):
         correct_dis = 0
         total_dis = 0
         with torch.no_grad():
-            for data in dataloader:
+            for data in train_dataset:
                 Xs, Zs, Ys = data
+                if cuda:
+                    Xs.cuda()
+                    Zs.cuda()
+                    Ys.cuda()
                 ouputs_enc = encoder(Xs)
                 outputs_cla = classifier(ouputs_enc)
                 _, predicted_cla = torch.max(outputs_cla.data, 1)
