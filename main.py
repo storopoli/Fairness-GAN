@@ -173,8 +173,7 @@ decoder = Decoder()
 classifier = Classifier()
 discriminator = Discriminator()
 
-# Lambda
-lambdas = torch.Tensor([opt.lambda_value, 8])
+
 
 if cuda:
     encoder.cuda()
@@ -195,7 +194,8 @@ optimizer_Dis = torch.optim.Adam(
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-
+# Lambda
+lambdas = Tensor([opt.lambda_value, 8])
 
 
 # ----------
@@ -269,9 +269,6 @@ for epoch in range(opt.n_epochs):
 
         optimizer_Dis.zero_grad()
 
-        if cuda:
-            x_tilde.cuda()
-
         # Classify a batch of examples
         y_hat = classifier(x_tilde).detach()
 
@@ -280,11 +277,6 @@ for epoch in range(opt.n_epochs):
 
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        if cuda:
-            z_hat.cuda()
-            z.cuda()
-            lambdas.cuda()
-
         dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
