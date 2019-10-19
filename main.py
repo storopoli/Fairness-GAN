@@ -297,7 +297,7 @@ for epoch in range(opt.n_epochs):
         correct_dis = 0
         total_dis = 0
         with torch.no_grad():
-            for data in testloader:
+            for data in dataloader:
                 Xs, Zs, Ys = data
                 ouputs_enc = encoder(Xs)
                 outputs_cla = classifier(ouputs_enc)
