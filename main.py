@@ -287,30 +287,36 @@ for epoch in range(opt.n_epochs):
         )
 
     if epoch % 100 == 0:  # for every 100 hundred epochs
-        correct_cla = 0
-        total_cla = 0
-        correct_dis = 0
-        total_dis = 0
-        with torch.no_grad():
-            Xs = train_dataset['data']
-            Zs = train_dataset['sensible']
-            Ys = train_dataset['label']
-            if cuda:
-                Xs.cuda()
-                Zs.cuda()
-                Ys.cuda()
-            ouputs_enc = encoder(Xs)
-            outputs_cla = classifier(ouputs_enc)
-            _, predicted_cla = torch.max(outputs_cla.data, 1)
-            total_cla += Ys.size(0)
-            correct_cla += (predicted_cla == Ys).sum().item()
-            outputs_dis = discriminator(ouputs_enc)
-            _, predicted_dis = torch.max(outputs_dis.data, 1)
-            total_dis += Zs.size(0)
-            correct_dis += (predicted_dis == Zs).sum().item()
+        for i, batch in enumerate(dataloader):
+            correct_cla = 0
+            total_cla = 0
+            correct_dis = 0
+            total_dis = 0
+            with torch.no_grad():
+                Xs = batch['data'].float()
+                Zs = batch['sensible'].float()
+                Ys = batch['label'].float()
 
-        print('Accuracy of the Classifier: %d %%' % (100 * correct_cla / total_cla))
-        print('Accuracy of the Discriminator: %d %%' % (100 * correct_dis / total_dis))
+                # adding an extra channel to Z and Y (N, M, 1)
+                Zs = Zs.unsqueeze_(-1)
+                Ys = Ys.unsqueeze_(-1)
+
+                if cuda:
+                    Xs.cuda()
+                    Zs.cuda()
+                    Ys.cuda()
+                ouputs_enc = encoder(Xs)
+                outputs_cla = classifier(ouputs_enc)
+                predicted_cla = (outputs_cla > 0.5).float()
+                total_cla += Ys.size(0)
+                correct_cla += (outputs_cla == Ys).sum().item()
+                outputs_dis = discriminator(ouputs_enc)
+                predicted_dis = (outputs_dis > 0.5).float()
+                total_dis += Zs.size(0)
+                correct_dis += (predicted_dis == Zs).sum().item()
+
+            print('Accuracy of the Classifier: %d %%' % (100 * correct_cla / total_cla))
+            print('Accuracy of the Discriminator: %d %%' % (100 * correct_dis / total_dis))
 
 torch.save({
     'Encoder': encoder.state_dict(),
