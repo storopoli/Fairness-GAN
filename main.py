@@ -207,9 +207,9 @@ for epoch in range(opt.n_epochs):
         y = batch['label'].float()
 
         if cuda:
-            x = data.cuda()
-            z = sensible.cuda()
-            y = label.cuda()
+            x = x.cuda()
+            z = z.cuda()
+            y = y.cuda()
 
 
         # -----------------
