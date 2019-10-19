@@ -266,11 +266,12 @@ for epoch in range(opt.n_epochs):
 
         optimizer_Dis.zero_grad()
 
+        # Classify a batch of examples
+        y_hat = classifier(x_tilde).detach()
+
         # Discriminate a batch of examples
         z_hat = discriminator(x_tilde)
 
-        # Classify a batch of examples
-        y_hat = classifier(x_tilde).detach()
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
         dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
