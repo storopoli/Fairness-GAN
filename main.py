@@ -211,10 +211,6 @@ for epoch in range(opt.n_epochs):
             z = z.cuda()
             y = y.cuda()
 
-        print(x.shape)
-        print(y.shape)
-        print(z.shape)
-
 
         # -----------------
         #  Train Enconder/Decoder
@@ -273,7 +269,7 @@ for epoch in range(opt.n_epochs):
         y_hat = classifier(x_tilde).detach()
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (BCE_loss(z_hat.view(32, 5278), z) * lambdas).mean()
+        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
         optimizer_Dis.step()
