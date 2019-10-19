@@ -286,38 +286,6 @@ for epoch in range(opt.n_epochs):
             % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
         )
 
-    if epoch % 100 == 0:  # for every 100 hundred epochs
-        for i, batch in enumerate(dataloader):
-            correct_cla = 0
-            total_cla = 0
-            correct_dis = 0
-            total_dis = 0
-            with torch.no_grad():
-                Xs = batch['data'].float()
-                Zs = batch['sensible'].float()
-                Ys = batch['label'].float()
-
-                # adding an extra channel to Z and Y (N, M, 1)
-                Zs = Zs.unsqueeze_(-1)
-                Ys = Ys.unsqueeze_(-1)
-
-                if cuda:
-                    Xs.cuda()
-                    Zs.cuda()
-                    Ys.cuda()
-                ouputs_enc = encoder(Xs)
-                outputs_cla = classifier(ouputs_enc)
-                predicted_cla = (outputs_cla > 0.5).float()
-                total_cla += Ys.size(0)
-                correct_cla += (outputs_cla == Ys).sum().item()
-                outputs_dis = discriminator(ouputs_enc)
-                predicted_dis = (outputs_dis > 0.5).float()
-                total_dis += Zs.size(0)
-                correct_dis += (predicted_dis == Zs).sum().item()
-
-            print('Accuracy of the Classifier: %d %%' % (100 * correct_cla / total_cla))
-            print('Accuracy of the Discriminator: %d %%' % (100 * correct_dis / total_dis))
-
 torch.save({
     'Encoder': encoder.state_dict(),
     'Decoder': decoder.state_dict(),
