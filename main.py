@@ -292,9 +292,9 @@ for epoch in range(opt.n_epochs):
         correct_dis = 0
         total_dis = 0
         with torch.no_grad():
-            Xs = train_dataset['data'].float()
-            Zs = train_dataset['sensible'].float()
-            Ys = train_dataset['label'].float()
+            Xs = train_dataset['data']
+            Zs = train_dataset['sensible']
+            Ys = train_dataset['label']
             if cuda:
                 Xs.cuda()
                 Zs.cuda()
