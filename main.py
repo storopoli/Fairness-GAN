@@ -2,10 +2,12 @@
 import argparse
 import numpy as np
 import time
+import matplotlib.pyplot as plt
 
-from torch.autograd import Variable
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from ignite.contrib.metrics import ROC_AUC
+from ignite.metrics import Accuracy
 
 import torch.nn as nn
 import torch
@@ -23,24 +25,28 @@ parser.add_argument("--b1", type=float, default=0.5,
                     help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999,
                     help="adam: decay of first order momentum of gradient")
+parser.add_argument("--p_dropout", type=float, default=0.2,
+                    help="probability of activation unit dropout in layers")
 parser.add_argument("--n_cpu", type=int, default=4,
                     help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=9,
+parser.add_argument("--latent_dim", type=int, default=8,
                     help="dimensionality of the latent code")
+parser.add_argument("--lambda_value", type=int, default=200,
+                    help="lambda regularizer for fair classification")
 
 opt = parser.parse_args()
 print(opt)
 
 torch.manual_seed(1234)  # for reproducibility
 
-X, Y, A = load_compas_data()
+X, Y, Z = load_compas_data()
 
 
-ds = np.c_[X, A['race'], Y]
+ds = np.c_[X, Z['race'], Y]
 
 # Y is "two_year_recid"
 # X are ['age_cat_25 - 45', 'age_cat_Greater than 45', 'age_cat_Less than 25', 'race', 'sex', 'priors_count', 'c_charge_degree']
-# A is 'race' 0 White; 1 Black
+# Z is 'race' 0 White; 1 Black
 
 cuda = True if torch.cuda.is_available() else False
 
@@ -53,9 +59,9 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        data = self.data
-        sensible = self.data[:, -2]
-        label = self.data[:, -1]
+        data = self.data[:, 0:-1]  # all expect last column Y
+        sensible = self.data[:, -2]  # only penultimate column Z
+        label = self.data[:, -1]  # only last column Y
         sample = {'data': data, 'sensible': sensible, 'label': label}
         return sample
 
@@ -70,33 +76,51 @@ dataloader = DataLoader(
     pin_memory=True
 )
 
-input_shape = ds.shape[1]
-
+print('# training samples:', len(train_dataset))
+print('# batches:', len(dataloader))
 
 # Input Gaussian noise
-def gaussian(ins, mean=0, stddev=0.05):
-    noise = Variable(ins.data.new(ins.size()).normal_(mean, stddev))
-    return ins + noise
+# def gaussian(ins, mean=0, stddev=0.05):
+#     noise = Variable(ins.data.new(ins.size()).normal_(mean, stddev))
+#     return ins + noise
 
 
-class Generator(nn.Module):
+class Encoder(nn.Module):
     def __init__(self):
-        super(Generator, self).__init__()
+        super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(input_shape, 9),
+            nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, 9),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, opt.latent_dim)
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, opt.latent_dim)
         )
 
-    # Inserting Random Gaussian Noise
-    def forward(self, x, mean=0, stddev=0.05):
-        z = self.model(x)
-        return gaussian(z)
+    def forward(self, x):
+        x = self.model(x)
+        return x
 
 
+class Decoder(nn.Module):
+    def __init__(self):
+        super(Decoder, self).__init__()
+
+        self.model = nn.Sequential(
+            nn.Linear(opt.latent_dim, 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 8)
+        )
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
 
 
 class Classifier(nn.Module):
@@ -104,16 +128,18 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 9),
+            nn.Linear(opt.latent_dim, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, 9),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, 1),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 1),
             nn.Sigmoid(),
         )
 
-    def forward(self, z):
-        y = self.model(z)
+    def forward(self, x):
+        y = self.model(x)
         return y
 
 
@@ -122,17 +148,19 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 9),
+            nn.Linear(opt.latent_dim, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, 9),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(9, 1),
+            nn.Dropout(opt.p_dropout),
+            nn.Linear(8, 1),
             nn.Sigmoid(),
         )
 
     def forward(self, x):
-        a = self.model(x)
-        return a
+        z = self.model(x)
+        return z
 
 
 # Loss functions
@@ -140,25 +168,31 @@ BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
 
 # Initialize generator and discriminators
-generator = Generator()
+encoder = Encoder()
+decoder = Decoder()
 classifier = Classifier()
 discriminator = Discriminator()
 
 if cuda:
-    generator.cuda()
+    encoder.cuda()
+    decoder.cuda()
     classifier.cuda()
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
 
 # Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_Dec = torch.optim.Adam(decoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_C = torch.optim.Adam(
     classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(
+optimizer_Dis = torch.optim.Adam(
     discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+
+# Lambda
+lambdas = torch.Tensor([opt.lambda_value, 8])
 
 
 # ----------
@@ -168,28 +202,41 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 for epoch in range(opt.n_epochs):
     start_time = time.time()
     for i, batch in enumerate(dataloader):
-        data = batch['data'].float()
-        sensible = batch['sensible'].float()
-        label = batch['label'].float()
+        x = batch['data'].float()
+        z = batch['sensible'].float()
+        y = batch['label'].float()
 
         if cuda:
-            data = data.cuda()
-            sensible = sensible.cuda()
-            label = label.cuda()
+            x = data.cuda()
+            z = sensible.cuda()
+            y = label.cuda()
 
 
         # -----------------
-        #  Train Generator
+        #  Train Enconder/Decoder
         # -----------------
 
-        optimizer_G.zero_grad()
+        optimizer_E.zero_grad()
 
         # Generate a batch of examples
-        gen_examples = generator(data)
+        x_tilde = encoder(x)
 
         # Loss measures generator's ability to fool the discriminator_1
-        g_loss = MSE_loss(gen_examples, data)
-        g_loss.backward()
+        enc_loss = MSE_loss(x_tilde, x)
+        enc_loss.backward()
+        optimizer_E.step()
+
+        optimizer_Dec.zero_grad()
+
+        # Reconstruct a batch of encoded examples
+        x_tilde = encoder(x).detach()
+        x_hat = decoder(x_tilde)
+
+        # Loss measures generator's ability to fool the discriminator_1
+        dec_loss = MSE_loss(x_hat, x)
+        dec_loss.backward()
+        optimizer_Dec.step()
+
 
         # ---------------------
         #  Train Classifier
@@ -198,59 +245,60 @@ for epoch in range(opt.n_epochs):
         optimizer_C.zero_grad()
 
         # Classify a batch of examples
-        cla_examples = classifier(data)
+        y_hat = classifier(x_tilde)
+
+        # Discriminate a batch of examples
+        z_hat = discriminator(x_tilde).detach()
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        c_loss = BCE_loss(cla_examples, label)
-
-        c_loss.backward(retain_graph=True)
+        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
+        cla_loss.backward()
         optimizer_C.step()
 
-        # ---------------------
-        #  Update Generator with error from C
-        # ---------------------
-        optimizer_G.zero_grad()
-        g_loss = c_loss
-        g_loss.backward()
-        optimizer_G.step()
 
         # ---------------------
         #  Train Discriminator
         # ---------------------
 
-        optimizer_D.zero_grad()
+        optimizer_Dis.zero_grad()
 
         # Discriminate a batch of examples
-        dis_examples = discriminator(data)
+        z_hat = discriminator(x_tilde)
+
+        # Classify a batch of examples
+        y_hat = classifier(x_tilde).detach()
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        d_loss = BCE_loss(dis_examples, sensible)
+        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
-        d_loss.backward(retain_graph=True)
-        optimizer_D.step()
+        dis_loss.backward()
+        optimizer_Dis.step()
 
-        # ---------------------
-        #  Update Generator with error from D
-        # ---------------------
-        optimizer_G.zero_grad()
-        g_loss = d_loss  # we want to fool the Discriminator
-        g_loss.backward()
-        optimizer_G.step()
 
         # Time it
         end_time = time.time()
         time_taken = end_time - start_time
 
         print(
-            "[Epoch %d/%d] [Batch %d/%d] [C loss: %f] [G loss: %f] [D loss: %f] [Time: %f]"
-            % (epoch, opt.n_epochs, i, len(dataloader), c_loss.item(), g_loss.item(), d_loss.item(), time_taken)
+            "[Epoch %d/%d] [Batch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [Time: %f]"
+            % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
+        )
+
+    if epoch % 100 == 0:  # for every 100 hundred epochs
+        acc = Accuracy(y_hat, y)
+        roc = ROC_AUC(torch.sigmoid(z_hat), z)
+        print(
+            "[Epoch %d/%d] [acc: %f] [roc: %f]"
+            % (epoch, opt.n_epochs, acc, roc)
         )
 
 torch.save({
-    'Generator': generator.state_dict(),
+    'Encoder': encoder.state_dict(),
+    'Decoder': decoder.state_dict(),
     'Classifier': classifier.state_dict(),
     'Discriminator': discriminator.state_dict(),
-    'optimizer_G': optimizer_G.state_dict(),
+    'optimizer_E': optimizer_E.state_dict(),
+    'optimizer_Dec': optimizer_Dec.state_dict(),
     'optimizer_C': optimizer_C.state_dict(),
-    'optimizer_D': optimizer_D.state_dict(),
+    'optimizer_Dis': optimizer_Dis.state_dict(),
 }, './saved_models/compas.pt')
