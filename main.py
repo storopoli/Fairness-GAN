@@ -182,7 +182,6 @@ if cuda:
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
-    lambdas.cuda()
 
 # Optimizers
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
