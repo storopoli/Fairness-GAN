@@ -277,6 +277,9 @@ for epoch in range(opt.n_epochs):
 
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
+        if cuda:
+            z_hat.cuda()
+            z.cuda()
         dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
