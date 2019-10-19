@@ -251,7 +251,7 @@ for epoch in range(opt.n_epochs):
         z_hat = discriminator(x_tilde).detach()
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
+        cla_loss = BCE_loss(y_hat.reshape(-1), y) - (BCE_loss(z_hat.reshape(-1), z) * lambdas).mean()
         cla_loss.backward()
         optimizer_C.step()
 
@@ -269,7 +269,7 @@ for epoch in range(opt.n_epochs):
         y_hat = classifier(x_tilde).detach()
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
+        dis_loss = (BCE_loss(z_hat.reshape(-1), z) * lambdas).mean()
 
         dis_loss.backward()
         optimizer_Dis.step()
