@@ -211,6 +211,10 @@ for epoch in range(opt.n_epochs):
             z = z.cuda()
             y = y.cuda()
 
+        print(x.shape)
+        print(y.shape)
+        print(z.shape)
+
 
         # -----------------
         #  Train Enconder/Decoder
