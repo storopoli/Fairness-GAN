@@ -280,6 +280,7 @@ for epoch in range(opt.n_epochs):
         if cuda:
             z_hat.cuda()
             z.cuda()
+            lambdas.cuda()
         dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
