@@ -292,8 +292,8 @@ for epoch in range(opt.n_epochs):
         )
 
     if epoch % 100 == 0:  # for every 100 hundred epochs
-        acc = Accuracy(y_hat, y)
-        roc = 1  # ROC_AUC(torch.sigmoid(z_hat, z))
+        acc = Accuracy(y_hat, y).compute()
+        roc = ROC_AUC(torch.sigmoid(z_hat, z)).compute()
         print(
             "[Epoch %d/%d] [acc: %f] [roc: %f]"
             % (epoch, opt.n_epochs, acc, roc)
