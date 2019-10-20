@@ -13,7 +13,7 @@ import torch
 from load_compas_data import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=10000,
+parser.add_argument("--n_epochs", type=int, default=1000,
                     help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=32,
                     help="size of the batches")
@@ -159,7 +159,7 @@ class Discriminator(nn.Module):
 # Loss functions
 BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
-CrossEntropy_loss = CrossEntropyLoss()
+CrossEntropy_loss = torch.nn.CrossEntropyLoss()
 
 # Initialize generator and discriminators
 encoder = Encoder()
