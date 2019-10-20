@@ -204,8 +204,8 @@ for epoch in range(opt.n_epochs):
         y = batch['label'].float()
 
         # adding an extra channel to Z and Y (N, M, 1)
-        z = z.unsqueeze_(-1)
-        y = y.unsqueeze_(-1)
+        z = z.view(-1, -1, 1)
+        y = y.view(-1, -1, 1)
 
         if cuda:
             x = x.cuda()
