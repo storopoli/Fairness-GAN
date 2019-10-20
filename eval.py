@@ -207,48 +207,55 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 # Lambda
 lambdas = Tensor([opt.lambda_value, 8])
 
+
+# model.eval() will notify all your layers that you are in eval mode, that way, batchnorm or dropout layers will work in eval mode instead of training mode.
+
+encoder.eval()
+decoder.eval()
+classifier.eval()
+discriminator.eval()
+
 correct_cla = 0
 total_cla = 0
 correct_dis = 0
 total_dis = 0
 t = Tensor([opt.threshold])  # threshold
 
-with torch.no_grad():
-    x = Tensor(train_dataset['data']['data'])
-    z = Tensor(train_dataset['data']['sensible'])
-    y = Tensor(train_dataset['data']['label'])
+x = Tensor(train_dataset['data']['data'])
+z = Tensor(train_dataset['data']['sensible'])
+y = Tensor(train_dataset['data']['label'])
 
-    # adding an extra channel to Z and Y (N, M, 1)
-    z = z.unsqueeze_(-1)
-    y = y.unsqueeze_(-1)
+# adding an extra channel to Z and Y (N, M, 1)
+z = z.unsqueeze_(-1)
+y = y.unsqueeze_(-1)
 
-    if cuda:
-        x = x.cuda()
-        z = z.cuda()
-        y = y.cuda()
+if cuda:
+    x = x.cuda()
+    z = z.cuda()
+    y = y.cuda()
 
-    # Generate x_tilde
-    x_tilde = encoder(x)
+# Generate x_tilde
+x_tilde = encoder(x)
 
-    # Classify x_tilde for Y
-    y_hat = classifier(x_tilde)
+# Classify x_tilde for Y
+y_hat = classifier(x_tilde)
 
-    # Discriminate x_tilde for Z
-    z_hat = discriminator(x_tilde)
+# Discriminate x_tilde for Z
+z_hat = discriminator(x_tilde)
 
-    # Classifier Predictions
-    for idx, i in enumerate(y_hat):
-        prediction_cla = (i > t).float()
-        if prediction_cla == y[idx]:
-            correct_cla += 1
-        total_cla += 1
+# Classifier Predictions
+for idx, i in enumerate(y_hat):
+    prediction_cla = (i > t).float()
+    if prediction_cla == y[idx]:
+        correct_cla += 1
+    total_cla += 1
 
-    # Discriminator Predictions
-    for idx, i in enumerate(z_hat):
-        prediction_dis = (i > t).float()
-        if prediction_dis == z[idx]:
-            correct_dis += 1
-        total_dis += 1
+# Discriminator Predictions
+for idx, i in enumerate(z_hat):
+    prediction_dis = (i > t).float()
+    if prediction_dis == z[idx]:
+        correct_dis += 1
+    total_dis += 1
 
 
 print(f"Classifier Accuracy (Lambda {opt.lambda_value}): ", round(correct_cla / total_cla, 3))
