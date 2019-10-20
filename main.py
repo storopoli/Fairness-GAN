@@ -2,8 +2,8 @@
 import argparse
 import numpy as np
 import time
-import matplotlib.pyplot as plt
 
+from torch.autograd import Variable
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
@@ -29,8 +29,12 @@ parser.add_argument("--n_cpu", type=int, default=4,
                     help="number of cpu threads to use during batch generation")
 parser.add_argument("--latent_dim", type=int, default=8,
                     help="dimensionality of the latent code")
-parser.add_argument("--lambda_value", type=int, default=200,
-                    help="lambda regularizer for fair classification")
+parser.add_argument("--alpha_value", type=float, default=1,
+                    help="alpha regularizer for classification utility")
+parser.add_argument("--beta_value", type=float, default=1,
+                    help="beta regularizer for decoder reconstruction of the inputs")
+parser.add_argument("--gamma_value", type=float, default=1,
+                    help="gamma regularizer for fair classification")
 
 opt = parser.parse_args()
 print(opt)
@@ -57,10 +61,10 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        data = self.data[:, 0:-1]  # all expect last column Y
-        sensible = self.data[:, -2]  # only penultimate column Z
-        label = self.data[:, -1]  # only last column Y
-        sample = {'data': data, 'sensible': sensible, 'label': label}
+        X = self.data[index, 0:-1]  # all expect last column Y
+        Z = self.data[index, -2]  # only penultimate column Z
+        Y = self.data[index, -1]  # only last column Y
+        sample = {'X': X, 'Z': Z, 'Y': Y}
         return sample
 
 
@@ -102,7 +106,7 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 8),
+            nn.Linear(opt.latent_dim + 1, 8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
@@ -188,8 +192,10 @@ optimizer_Dis = torch.optim.Adam(
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-# Lambda
-lambdas = Tensor([opt.lambda_value, 8])
+# Hyperparameters Regularizer
+alpha = Tensor([opt.alpha_value])
+beta = Tensor([opt.beta_value])
+gamma = Tensor([opt.gamma_value])
 
 
 # ----------
@@ -199,9 +205,9 @@ lambdas = Tensor([opt.lambda_value, 8])
 for epoch in range(opt.n_epochs):
     start_time = time.time()
     for i, batch in enumerate(dataloader):
-        x = batch['data'].float()
-        z = batch['sensible'].float()
-        y = batch['label'].float()
+        x = batch['X'].float()
+        z = batch['Z'].float()
+        y = batch['Y'].float()
 
         # adding an extra channel to Z and Y (N, M, 1)
         z = z.unsqueeze_(-1)
@@ -213,29 +219,19 @@ for epoch in range(opt.n_epochs):
             y = y.cuda()
 
 
+        x_tilde = encoder(x).detach()
         # -----------------
-        #  Train Enconder/Decoder
+        #  Train Decoder
         # -----------------
-
-        optimizer_E.zero_grad()
-
-        # Generate a batch of examples
-        x_tilde = encoder(x)
-
-        # Loss measures generator's ability to fool the discriminator_1
-        enc_loss = MSE_loss(x_tilde, x)
-        enc_loss.backward()
-        optimizer_E.step()
 
         optimizer_Dec.zero_grad()
 
         # Reconstruct a batch of encoded examples
-        x_tilde = encoder(x).detach()
-        x_hat = decoder(x_tilde)
+        x_hat = decoder(torch.cat((x_tilde, z), -1))
 
-        # Loss measures generator's ability to fool the discriminator_1
-        dec_loss = MSE_loss(x_hat, x)
-        dec_loss.backward()
+        # Loss measures decoder ability to reconstruct the generated examples
+        dec_loss = (MSE_loss(x_hat, x) * beta)  # TODO: insert beta hyperparameters
+        dec_loss.backward(retain_graph=True)
         optimizer_Dec.step()
 
 
@@ -245,15 +241,12 @@ for epoch in range(opt.n_epochs):
 
         optimizer_C.zero_grad()
 
-        # Discriminate a batch of examples
-        z_hat = discriminator(x_tilde).detach()
-
         # Classify a batch of examples
         y_hat = classifier(x_tilde)
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
-        cla_loss.backward()
+        cla_loss = (BCE_loss(y_hat, y) * alpha)  # TODO: insert alpha hyperparameters
+        cla_loss.backward(retain_graph=True)
         optimizer_C.step()
 
 
@@ -263,28 +256,40 @@ for epoch in range(opt.n_epochs):
 
         optimizer_Dis.zero_grad()
 
-        # Classify a batch of examples
-        y_hat = classifier(x_tilde).detach()
-
         # Discriminate a batch of examples
         z_hat = discriminator(x_tilde)
 
+        # Measure discriminator's ability to discrimante real Z from generated samples' Z_hat
+        dis_loss = (BCE_loss(z_hat, z) * gamma)  # TODO: insert gamma hyperparameters
 
-        # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
-
-        dis_loss.backward()
+        dis_loss.backward(retain_graph=True)
         optimizer_Dis.step()
 
 
-        # Time it
-        end_time = time.time()
-        time_taken = end_time - start_time
+        # ---------------------
+        #  Train Encoder
+        # ---------------------
 
-        print(
-            "[Epoch %d/%d] [Batch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [Time: %f]"
-            % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
-        )
+        optimizer_E.zero_grad()
+
+        # Generate a batch of examples
+        x_tilde = encoder(x)
+
+        enc_loss = dec_loss + cla_loss - dis_loss
+
+        enc_loss.backward()
+        optimizer_E.step()
+
+
+    # Time it
+    end_time = time.time()
+    time_taken = end_time - start_time
+
+    print(
+        "[Epoch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [Time: %f]"
+        % (epoch, opt.n_epochs, enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
+    )
+
 
 torch.save({
     'Encoder': encoder.state_dict(),
@@ -295,4 +300,4 @@ torch.save({
     'optimizer_Dec': optimizer_Dec.state_dict(),
     'optimizer_C': optimizer_C.state_dict(),
     'optimizer_Dis': optimizer_Dis.state_dict(),
-}, f"./saved_models/compas_lambda_{opt.lambda_value}.pt")
+}, f"./saved_models/compas-alpha_{opt.alpha_value}-beta_{opt.beta_value}-gamma_{opt.gamma_value}.pt")
