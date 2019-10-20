@@ -204,8 +204,8 @@ for epoch in range(opt.n_epochs):
         y = batch['label'].float()
 
         # adding an extra channel to Z and Y (N, M, 1)
-        z = z.view(-1, -1, 1)
-        y = y.view(-1, -1, 1)
+        z = z.unsqueeze_(-1)
+        y = y.unsqueeze_(-1)
 
         if cuda:
             x = x.cuda()
@@ -252,7 +252,7 @@ for epoch in range(opt.n_epochs):
         y_hat = classifier(x_tilde)
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = CrossEntropy_loss(y_hat, y) - (CrossEntropy_loss(z_hat, z) * lambdas).mean()
+        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
         cla_loss.backward()
         optimizer_C.step()
 
@@ -271,7 +271,7 @@ for epoch in range(opt.n_epochs):
 
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (CrossEntropy_loss(z_hat, z) * lambdas).mean()
+        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
         optimizer_Dis.step()
