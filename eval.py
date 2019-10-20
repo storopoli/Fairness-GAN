@@ -31,6 +31,9 @@ parser.add_argument("--latent_dim", type=int, default=8,
                     help="dimensionality of the latent code")
 parser.add_argument("--lambda_value", type=int, default=200,
                     help="lambda regularizer for fair classification")
+parser.add_argument("--threshold", type=float, default=0.5,
+                    help="Threshold for probability of Sigmoid")
+
 
 opt = parser.parse_args()
 print(opt)
@@ -47,6 +50,15 @@ ds = np.c_[X, Z['race'], Y]
 # Z is 'race' 0 White; 1 Black
 
 cuda = True if torch.cuda.is_available() else False
+
+# Load on GPU / CPU
+if cuda:
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+
+# Model Saved PATH
+saved_models = torch.load(f"./saved_models/compas_lambda_{opt.lambda_value}.pt", map_location=device)
 
 
 class DatasetCompas(Dataset):
@@ -65,17 +77,6 @@ class DatasetCompas(Dataset):
 
 
 train_dataset = DatasetCompas(ds)
-
-dataloader = DataLoader(
-    train_dataset,
-    batch_size=opt.batch_size,
-    shuffle=True,
-    num_workers=opt.n_cpu,
-    pin_memory=True
-)
-
-print('# training samples:', len(train_dataset))
-print('# batches:', len(dataloader))
 
 
 class Encoder(nn.Module):
@@ -161,11 +162,18 @@ BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
 CrossEntropy_loss = torch.nn.CrossEntropyLoss()
 
-# Initialize networks
+# Initialize networks and load models parameters
 encoder = Encoder()
+encoder.load_state_dict(saved_models['Encoder'])
+
 decoder = Decoder()
+decoder.load_state_dict(saved_models['Decoder'])
+
 classifier = Classifier()
+classifier.load_state_dict(saved_models['Classifier'])
+
 discriminator = Discriminator()
+discriminator.load_state_dict(saved_models['Discriminator'])
 
 
 # CUDA
@@ -178,121 +186,70 @@ if cuda:
     MSE_loss.cuda()
     CrossEntropy_loss.cuda()
 
-# Optimizers
+# Optimizers loaded from saved models
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_E.load_state_dict(saved_models['optimizer_E'])
+
 optimizer_Dec = torch.optim.Adam(decoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_Dec.load_state_dict(saved_models['optimizer_Dec'])
+
 optimizer_C = torch.optim.Adam(
     classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_C.load_state_dict(saved_models['optimizer_C'])
+
 optimizer_Dis = torch.optim.Adam(
     discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_Dis.load_state_dict(saved_models['optimizer_Dis'])
+
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 # Lambda
 lambdas = Tensor([opt.lambda_value, 8])
 
+correct_cla = 0
+total_cla = 0
+correct_dis = 0
+total_dis = 0
+t = Tensor([opt.threshold])  # threshold
 
-# ----------
-#  Training
-# ----------
+with torch.no_grad():
+    x = Tensor(train_dataset['data']['data'])
+    z = Tensor(train_dataset['data']['sensible'])
+    y = Tensor(train_dataset['data']['label'])
 
-for epoch in range(opt.n_epochs):
-    start_time = time.time()
-    for i, batch in enumerate(dataloader):
-        x = batch['data'].float()
-        z = batch['sensible'].float()
-        y = batch['label'].float()
+    # adding an extra channel to Z and Y (N, M, 1)
+    z = z.unsqueeze_(-1)
+    y = y.unsqueeze_(-1)
 
-        # adding an extra channel to Z and Y (N, M, 1)
-        z = z.unsqueeze_(-1)
-        y = y.unsqueeze_(-1)
+    if cuda:
+        x = x.cuda()
+        z = z.cuda()
+        y = y.cuda()
 
-        if cuda:
-            x = x.cuda()
-            z = z.cuda()
-            y = y.cuda()
+    # Generate x_tilde
+    x_tilde = encoder(x)
 
+    # Classify x_tilde for Y
+    y_hat = classifier(x_tilde)
 
-        # -----------------
-        #  Train Enconder/Decoder
-        # -----------------
+    # Discriminate x_tilde for Z
+    z_hat = discriminator(x_tilde)
 
-        optimizer_E.zero_grad()
+    # Classifier Predictions
+    for idx, i in enumerate(y_hat):
+        prediction_cla = (i > t).float()
+        if prediction_cla == y[idx]:
+            correct_cla += 1
+        total_cla += 1
 
-        # Generate a batch of examples
-        x_tilde = encoder(x)
-
-        # Loss measures generator's ability to fool the discriminator_1
-        enc_loss = MSE_loss(x_tilde, x)
-        enc_loss.backward()
-        optimizer_E.step()
-
-        optimizer_Dec.zero_grad()
-
-        # Reconstruct a batch of encoded examples
-        x_tilde = encoder(x).detach()
-        x_hat = decoder(x_tilde)
-
-        # Loss measures generator's ability to fool the discriminator_1
-        dec_loss = MSE_loss(x_hat, x)
-        dec_loss.backward()
-        optimizer_Dec.step()
+    # Discriminator Predictions
+    for idx, i in enumerate(z_hat):
+        prediction_dis = (i > t).float()
+        if prediction_dis == z[idx]:
+            correct_dis += 1
+        total_dis += 1
 
 
-        # ---------------------
-        #  Train Classifier
-        # ---------------------
-
-        optimizer_C.zero_grad()
-
-        # Discriminate a batch of examples
-        z_hat = discriminator(x_tilde).detach()
-
-        # Classify a batch of examples
-        y_hat = classifier(x_tilde)
-
-        # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
-        cla_loss.backward()
-        optimizer_C.step()
-
-
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
-
-        optimizer_Dis.zero_grad()
-
-        # Classify a batch of examples
-        y_hat = classifier(x_tilde).detach()
-
-        # Discriminate a batch of examples
-        z_hat = discriminator(x_tilde)
-
-
-        # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
-
-        dis_loss.backward()
-        optimizer_Dis.step()
-
-
-        # Time it
-        end_time = time.time()
-        time_taken = end_time - start_time
-
-        print(
-            "[Epoch %d/%d] [Batch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [Time: %f]"
-            % (epoch, opt.n_epochs, i, len(dataloader), enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
-        )
-
-torch.save({
-    'Encoder': encoder.state_dict(),
-    'Decoder': decoder.state_dict(),
-    'Classifier': classifier.state_dict(),
-    'Discriminator': discriminator.state_dict(),
-    'optimizer_E': optimizer_E.state_dict(),
-    'optimizer_Dec': optimizer_Dec.state_dict(),
-    'optimizer_C': optimizer_C.state_dict(),
-    'optimizer_Dis': optimizer_Dis.state_dict(),
-}, f"./saved_models/compas_lambda_{opt.lambda_value}.pt")
+print(f"Classifier Accuracy (Lambda {opt.lambda_value}): ", round(correct_cla / total_cla, 3))
+print(f"Discriminator Accuracy (Lambda {opt.lambda_value}): ", round(correct_dis / total_dis, 3))
