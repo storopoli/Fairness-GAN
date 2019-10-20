@@ -3,6 +3,28 @@ Fairness Project using GANs to generate fair data representations applied to the
 
 ## Usage
 
+### Python Virtual Environment
+
+1. Install `venv`
+
+   ```bash
+   pip install venv
+   ```
+
+2. Activate Virtual Environment
+
+   ```bash
+   source venv/bin/activate
+   ```
+
+3. Instal requirements
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Anaconda
+
 1. Create a anaconda environtment from `environment.yml`
 
    ```bash
