@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from ignite.contrib.metrics import ROC_AUC
-from ignite.metrics import Accuracy
 
 import torch.nn as nn
 import torch
@@ -161,6 +159,7 @@ class Discriminator(nn.Module):
 # Loss functions
 BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
+CrossEntropy_loss = CrossEntropyLoss()
 
 # Initialize generator and discriminators
 encoder = Encoder()
@@ -177,6 +176,7 @@ if cuda:
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
+    CrossEntropy_loss.cuda()
 
 # Optimizers
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -252,7 +252,7 @@ for epoch in range(opt.n_epochs):
         y_hat = classifier(x_tilde)
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = BCE_loss(y_hat, y) - (BCE_loss(z_hat, z) * lambdas).mean()
+        cla_loss = CrossEntropy_loss(y_hat, y) - (CrossEntropy_loss(z_hat, z) * lambdas).mean()
         cla_loss.backward()
         optimizer_C.step()
 
@@ -271,7 +271,7 @@ for epoch in range(opt.n_epochs):
 
 
         # Measure discriminator's ability to discrimante real A from generated samples' A_hat
-        dis_loss = (BCE_loss(z_hat, z) * lambdas).mean()
+        dis_loss = (CrossEntropy_loss(z_hat, z) * lambdas).mean()
 
         dis_loss.backward()
         optimizer_Dis.step()
@@ -295,4 +295,4 @@ torch.save({
     'optimizer_Dec': optimizer_Dec.state_dict(),
     'optimizer_C': optimizer_C.state_dict(),
     'optimizer_Dis': optimizer_Dis.state_dict(),
-}, './saved_models/compas.pt')
+}, f"./saved_models/compas_lambda_{opt.lambda_value}.pt")
