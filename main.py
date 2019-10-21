@@ -3,7 +3,6 @@ import argparse
 import numpy as np
 import time
 
-from torch.autograd import Variable
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
@@ -209,7 +208,7 @@ for epoch in range(opt.n_epochs):
         z = batch['Z'].float()
         y = batch['Y'].float()
 
-        # adding an extra channel to Z and Y (N, M, 1)
+        # adding an extra dimension to Z and Y (M, 1)
         z = z.unsqueeze_(-1)
         y = y.unsqueeze_(-1)
 

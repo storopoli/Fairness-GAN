@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 import argparse
 import numpy as np
-import time
-import matplotlib.pyplot as plt
+import pickle
 
 from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 
 import torch.nn as nn
 import torch
@@ -29,10 +27,12 @@ parser.add_argument("--n_cpu", type=int, default=4,
                     help="number of cpu threads to use during batch generation")
 parser.add_argument("--latent_dim", type=int, default=8,
                     help="dimensionality of the latent code")
-parser.add_argument("--lambda_value", type=int, default=200,
-                    help="lambda regularizer for fair classification")
-parser.add_argument("--threshold", type=float, default=0.5,
-                    help="Threshold for probability of Sigmoid")
+parser.add_argument("--alpha_value", type=float, default=1,
+                    help="alpha regularizer for classification utility")
+parser.add_argument("--beta_value", type=float, default=1,
+                    help="beta regularizer for decoder reconstruction of the inputs")
+parser.add_argument("--gamma_value", type=float, default=1,
+                    help="gamma regularizer for fair classification")
 
 
 opt = parser.parse_args()
@@ -58,7 +58,7 @@ else:
     device = torch.device('cpu')
 
 # Model Saved PATH
-saved_models = torch.load(f"./saved_models/compas_lambda_{opt.lambda_value}.pt", map_location=device)
+saved_models = torch.load(f"./saved_models/compas-alpha_{opt.alpha_value}-beta_{opt.beta_value}-gamma_{opt.gamma_value}.pt", map_location=device)
 
 
 class DatasetCompas(Dataset):
@@ -69,10 +69,10 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        data = self.data[:, 0:-1]  # all expect last column Y
-        sensible = self.data[:, -2]  # only penultimate column Z
-        label = self.data[:, -1]  # only last column Y
-        sample = {'data': data, 'sensible': sensible, 'label': label}
+        X = self.data[:, 0:-1]  # all expect last column Y
+        Z = self.data[:, -2]  # only penultimate column Z
+        Y = self.data[:, -1]  # only last column Y
+        sample = {'X': X, 'Z': Z, 'Y': Y}
         return sample
 
 
@@ -103,7 +103,7 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 8),
+            nn.Linear(opt.latent_dim + 1, 8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
@@ -204,10 +204,6 @@ optimizer_Dis.load_state_dict(saved_models['optimizer_Dis'])
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-# Lambda
-lambdas = Tensor([opt.lambda_value, 8])
-
-
 # model.eval() will notify all your layers that you are in eval mode, that way, batchnorm or dropout layers will work in eval mode instead of training mode.
 
 encoder.eval()
@@ -219,13 +215,12 @@ correct_cla = 0
 total_cla = 0
 correct_dis = 0
 total_dis = 0
-t = Tensor([opt.threshold])  # threshold
 
-x = Tensor(train_dataset['data']['data'])
-z = Tensor(train_dataset['data']['sensible'])
-y = Tensor(train_dataset['data']['label'])
+x = Tensor(train_dataset['data']['X'])
+z = Tensor(train_dataset['data']['Z'])
+y = Tensor(train_dataset['data']['Y'])
 
-# adding an extra channel to Z and Y (N, M, 1)
+# adding an extra dimension to Z and Y (M, 1)
 z = z.unsqueeze_(-1)
 y = y.unsqueeze_(-1)
 
@@ -243,20 +238,27 @@ y_hat = classifier(x_tilde)
 # Discriminate x_tilde for Z
 z_hat = discriminator(x_tilde)
 
-# Classifier Predictions
-for idx, i in enumerate(y_hat):
-    prediction_cla = (i > t).float()
-    if prediction_cla == y[idx]:
-        correct_cla += 1
-    total_cla += 1
 
-# Discriminator Predictions
-for idx, i in enumerate(z_hat):
-    prediction_dis = (i > t).float()
-    if prediction_dis == z[idx]:
-        correct_dis += 1
-    total_dis += 1
+# Create a list of lists to Plot
+accuracy_cla = []
+accuracy_dis = []
+for t in range(0, 100):
+    threshold = t / 100
+    # threshold = Variable(Tensor([thresh]))
 
+    # Accuracy Classifier
+    matches_cla = [(i > threshold) == j for i, j in zip(y_hat.float(), y.float())]
+    acc_cla = (threshold, matches_cla.count(True) / len(matches_cla))
+    accuracy_cla.append(acc_cla)
 
-print(f"Classifier Accuracy (Lambda {opt.lambda_value}): ", round(correct_cla / total_cla, 3))
-print(f"Discriminator Accuracy (Lambda {opt.lambda_value}): ", round(correct_dis / total_dis, 3))
+    # Accuracy Classifier
+    matches_dis = [(i > threshold) == j for i, j in zip(z_hat.float(), z.float())]
+    acc_dis = (threshold, matches_dis.count(True) / len(matches_dis))
+    accuracy_dis.append(acc_dis)
+
+# Save lists
+with open('accuracy_cla.pickle', 'wb') as handle:
+    pickle.dump(accuracy_cla, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+with open('accuracy_dis.pickle', 'wb') as handle:
+    pickle.dump(accuracy_dis, handle, protocol=pickle.HIGHEST_PROTOCOL)
