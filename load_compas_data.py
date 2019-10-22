@@ -1,5 +1,5 @@
 from __future__ import division
-import urllib3
+from urllib.request import urlopen
 import os,sys
 import numpy as np
 import pandas as pd
@@ -25,7 +25,7 @@ def check_data_file(fname):
     if fname not in files:
         print("'%s' not found! Downloading from GitHub..." % fname)
         addr = "https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv"
-        response = urllib3.urlopen(addr)
+        response = urlopen(addr)
         data = response.read()
         fileOut = open(fname, "w")
         fileOut.write(data)
@@ -37,7 +37,7 @@ def check_data_file(fname):
 
 def load_compas_data():
 
-	FEATURES_CLASSIFICATION = ["age_cat", "race", "sex", "priors_count", "c_charge_degree"] #features to be used for classification
+	FEATURES_CLASSIFICATION = ["age_cat", "sex", "priors_count", "c_charge_degree"] #features to be used for classification
 	CONT_VARIABLES = ["priors_count"] # continuous features, will need to be handled separately from categorical features, categorical features will be encoded using one-hot
 	CLASS_FEATURE = "two_year_recid" # the decision variable
 	SENSITIVE_ATTRS = ["race"]
@@ -86,7 +86,7 @@ def load_compas_data():
 
 	# convert class label 0 to -1
 	y = data[CLASS_FEATURE]
-	y[y==0] = -1
+	# y[y==0] = -1
 
 	
 	
@@ -111,11 +111,6 @@ def load_compas_data():
 			lb.fit(vals)
 			vals = lb.transform(vals)
 
-		# add to sensitive features dict
-		if attr in SENSITIVE_ATTRS:
-			x_control[attr] = vals
-
-
 		# add to learnable features
 		X = np.hstack((X, vals))
 
@@ -128,6 +123,15 @@ def load_compas_data():
 				for k in lb.classes_: # non-binary categorical features, need to add the names for each cat
 					feature_names.append(attr + "_" + str(k))
 
+	# Sensitive Atributes
+	for attr in SENSITIVE_ATTRS:
+		vals = data[attr]
+		lb = preprocessing.LabelBinarizer()
+		lb.fit(vals)
+		vals = lb.transform(vals)
+		# add to sensitive features dict
+		if attr in SENSITIVE_ATTRS:
+			x_control[attr] = vals
 
 	# convert the sensitive feature to 1-d array
 	x_control = dict(x_control)
@@ -138,7 +142,11 @@ def load_compas_data():
 	# sys.exit(1)
 
 	assert(len(feature_names) == X.shape[1])
-	print("Features we will be using for classification are:", feature_names, "\n")
+	
+	print("Features we will be using for classification are (X):", feature_names, "\n")
 
+	print("Sensible Features we will be using for classification are (Z):", SENSITIVE_ATTRS, "\n")
+
+	print("What we want to predict is (Y):", CLASS_FEATURE, "\n")
 
 	return X, y, x_control

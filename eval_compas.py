@@ -38,7 +38,10 @@ parser.add_argument("--gamma_value", type=float, default=1,
 opt = parser.parse_args()
 print(opt)
 
-torch.manual_seed(1234)  # for reproducibility
+SEED = 1234
+seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)  # for reproducibility
 
 X, Y, Z = load_compas_data()
 

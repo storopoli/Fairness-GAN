@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch
 
 from load_compas_data import *
+from plot_metrics import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=1000,
@@ -22,12 +23,8 @@ parser.add_argument("--b1", type=float, default=0.5,
                     help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999,
                     help="adam: decay of first order momentum of gradient")
-parser.add_argument("--p_dropout", type=float, default=0.2,
-                    help="probability of activation unit dropout in layers")
 parser.add_argument("--n_cpu", type=int, default=4,
                     help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=8,
-                    help="dimensionality of the latent code")
 parser.add_argument("--alpha_value", type=float, default=1,
                     help="alpha regularizer for classification utility")
 parser.add_argument("--beta_value", type=float, default=1,
@@ -36,20 +33,28 @@ parser.add_argument("--gamma_value", type=float, default=1,
                     help="gamma regularizer for fair classification")
 
 opt = parser.parse_args()
-print(opt)
+print('\n', opt)
 
-torch.manual_seed(1234)  # for reproducibility
+SEED = 1234
+seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)  # for reproducibility
+
+# CUDA Stuff
+cuda = True if torch.cuda.is_available() else False
+
+if cuda:
+    print("\nRunning on the GPU\n")
+else:
+    print("\nRunning on the CPU\n")
 
 X, Y, Z = load_compas_data()
-
 
 ds = np.c_[X, Z['race'], Y]
 
 # Y is "two_year_recid"
-# X are ['age_cat_25 - 45', 'age_cat_Greater than 45', 'age_cat_Less than 25', 'race', 'sex', 'priors_count', 'c_charge_degree']
+# X are ['age_cat_25 - 45', 'age_cat_Greater than 45', 'age_cat_Less than 25', 'sex', 'priors_count', 'c_charge_degree'] all 0 or 1 and priors count is continuous (mean=0; variance=1)
 # Z is 'race' 0 White; 1 Black
-
-cuda = True if torch.cuda.is_available() else False
 
 
 class DatasetCompas(Dataset):
@@ -88,11 +93,7 @@ class Encoder(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
-            nn.Linear(8, opt.latent_dim)
         )
 
     def forward(self, x):
@@ -105,13 +106,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim + 1, 8),
+            nn.Linear(9, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
-            nn.Linear(8, 8)
         )
 
     def forward(self, x):
@@ -124,12 +121,8 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 1),
             nn.Sigmoid(),
         )
@@ -144,12 +137,8 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(opt.p_dropout),
             nn.Linear(8, 1),
             nn.Sigmoid(),
         )
@@ -162,7 +151,6 @@ class Discriminator(nn.Module):
 # Loss functions
 BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
-CrossEntropy_loss = torch.nn.CrossEntropyLoss()
 
 # Initialize networks
 encoder = Encoder()
@@ -179,7 +167,6 @@ if cuda:
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
-    CrossEntropy_loss.cuda()
 
 # Optimizers
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -201,6 +188,13 @@ gamma = Tensor([opt.gamma_value])
 #  Training
 # ----------
 
+# Logging
+MODEL_NAME = f"compas-alpha_{opt.alpha_value}-beta_{opt.beta_value}-gamma_{opt.gamma_value}"
+
+with open(f"./logs/{MODEL_NAME}.csv", "w") as f:
+        f.write(f"{MODEL_NAME},timestamp,epoch,enc_loss,dec_loss,cla_loss,cla_acc,dis_loss,dis_acc\n")
+
+# Training
 for epoch in range(opt.n_epochs):
     start_time = time.time()
     for i, batch in enumerate(dataloader):
@@ -209,8 +203,11 @@ for epoch in range(opt.n_epochs):
         y = batch['Y'].float()
 
         # adding an extra dimension to Z and Y (M, 1)
-        z = z.unsqueeze_(-1)
-        y = y.unsqueeze_(-1)
+        z = z.view(-1, 1)
+        y = y.view(-1, 1)
+
+        # Concatenating X and Z for Encoder
+        x = torch.cat((x, z), -1)
 
         if cuda:
             x = x.cuda()
@@ -284,11 +281,24 @@ for epoch in range(opt.n_epochs):
     end_time = time.time()
     time_taken = end_time - start_time
 
+    # Accuracy Classifier
+    matches_cla = [(i > 0.5) == j for i, j in zip(y_hat, y)]
+    acc_cla = matches_cla.count(True) / len(matches_cla)
+
+    # Accuracy Discriminator
+    matches_dis = [(i > 0.5) == j for i, j in zip(z_hat, z)]
+    acc_dis = matches_dis.count(True) / len(matches_dis)
+
     print(
-        "[Epoch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [Time: %f]"
-        % (epoch, opt.n_epochs, enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), time_taken)
+        "[Epoch %d/%d] [enc loss: %f] [dec loss: %f] [cla loss: %f] [dis loss: %f] [cla acc: %f] [dis acc: %f] [Time: %f]"
+        % (epoch, opt.n_epochs, enc_loss.item(), dec_loss.item(), cla_loss.item(), dis_loss.item(), acc_cla, acc_dis, time_taken)
     )
 
+    with open(f"./logs/{MODEL_NAME}.csv", "a") as f:
+        f.write(f"{MODEL_NAME},{int(time.time())},{epoch},{round(float(enc_loss),4)},{round(float(dec_loss),4)},{round(float(cla_loss),4)},{round(float(acc_cla),2)},{round(float(dis_loss),4)},{round(float(acc_dis),2)}\n")
+
+# Plot the graph after the end of training
+create_acc_loss_graph(f"{MODEL_NAME}")
 
 torch.save({
     'Encoder': encoder.state_dict(),
