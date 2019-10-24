@@ -223,7 +223,7 @@ for epoch in range(opt.n_epochs):
             x = x.cuda()
             z = z.cuda()
             y = y.cuda()
-            labels = label.cuda()
+            labels = labels.cuda()
 
 
         x_tilde = encoder(x).detach()
