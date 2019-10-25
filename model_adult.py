@@ -101,9 +101,9 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(113, 113),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(113, 113),
+            nn.Linear(8, 113),
         )
 
     def forward(self, x):
@@ -116,9 +116,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(114, 113),
+            nn.Linear(114, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(113, 113),
+            nn.Linear(8, 113),
         )
 
     def forward(self, x):
@@ -131,9 +131,9 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(113, 113),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(113, 2)
+            nn.Linear(8, 2)
         )
 
     def forward(self, x):
@@ -146,10 +146,10 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(113, 113),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(113, 1),
-            nn.Sigmoid(),
+            nn.Linear(8, 1),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -224,7 +224,6 @@ for epoch in range(opt.n_epochs):
             z = z.cuda()
             y = y.cuda()
             labels = labels.cuda()
-
 
         x_tilde = encoder(x).detach()
         # -----------------
