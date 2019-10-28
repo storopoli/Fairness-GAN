@@ -65,7 +65,7 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        X = self.data[index, 0:-1]  # all expect last column Y
+        X = self.data[index, 0:-2]  # all expect last columns Y and Z
         Z = self.data[index, -2]  # only penultimate column Z
         Y = self.data[index, -1]  # only last column Y
         sample = {'X': X, 'Z': Z, 'Y': Y}
@@ -91,9 +91,9 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(8, 8),
+            nn.Linear(7, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(8, 8),
+            nn.Linear(8, 7),
         )
 
     def forward(self, x):
@@ -106,9 +106,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(9, 8),
-            nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(8, 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(8, 7),
         )
 
     def forward(self, x):
@@ -121,7 +121,7 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(8, 8),
+            nn.Linear(7, 8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(8, 1),
             nn.Sigmoid(),
@@ -137,7 +137,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(8, 8),
+            nn.Linear(7, 8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(8, 1),
             nn.Sigmoid(),
@@ -208,7 +208,6 @@ for epoch in range(opt.n_epochs):
 
         # Concatenating X and Z for Encoder
         x = torch.cat((x, z), -1)
-
         if cuda:
             x = x.cuda()
             z = z.cuda()
@@ -282,11 +281,14 @@ for epoch in range(opt.n_epochs):
     time_taken = end_time - start_time
 
     # Accuracy Classifier
-    matches_cla = [(i > 0.5) == j for i, j in zip(y_hat, y)]
+    X_hat = encoder(Tensor(np.c_[X, Z['race']])).detach()
+    Y_hat = classifier(X_hat).detach()
+    matches_cla = [(i > 0.5) == j for i, j in zip(Y_hat, Tensor(Y))]
     acc_cla = matches_cla.count(True) / len(matches_cla)
 
     # Accuracy Discriminator
-    matches_dis = [(i > 0.5) == j for i, j in zip(z_hat, z)]
+    Z_hat = discriminator(X_hat).detach()
+    matches_dis = [(i > 0.5) == j for i, j in zip(Z_hat, Tensor(Z['race']))]
     acc_dis = matches_dis.count(True) / len(matches_dis)
 
     print(

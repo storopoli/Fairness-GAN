@@ -9,7 +9,6 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch
 
-from load_compas_data import *
 from plot_metrics import *
 
 parser = argparse.ArgumentParser()
@@ -36,7 +35,6 @@ opt = parser.parse_args()
 print('\n', opt)
 
 SEED = 1234
-seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)  # for reproducibility
 
@@ -77,7 +75,7 @@ class DatasetAdult(Dataset):
     def __getitem__(self, index):
         X = self.data[index, 0:-2]  # all expect last two columns Y
         Z = self.data[index, -3]  # only third to last column Z
-        Y = self.data[index, -2:-1]  # only last two columns Y
+        Y = self.data[index, -2:]  # only last two columns Y
         sample = {'X': X, 'Z': Z, 'Y': Y}
         return sample
 
@@ -133,7 +131,8 @@ class Classifier(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(8, 2)
+            nn.Linear(8, 2),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -178,8 +177,6 @@ if cuda:
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
-    NLL_loss.cuda()
-    CES_loss.cuda()
 
 # Optimizers
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -214,7 +211,6 @@ for epoch in range(opt.n_epochs):
         x = batch['X'].float()
         z = batch['Z'].float()
         y = batch['Y'].float()
-        labels = torch.argmax(y, dim=1)
 
         # adding an extra dimension to Z (M, 1)
         z = z.view(-1, 1)
@@ -223,7 +219,6 @@ for epoch in range(opt.n_epochs):
             x = x.cuda()
             z = z.cuda()
             y = y.cuda()
-            labels = labels.cuda()
 
         x_tilde = encoder(x).detach()
         # -----------------
@@ -236,7 +231,7 @@ for epoch in range(opt.n_epochs):
         x_hat = decoder(torch.cat((x_tilde, z), -1))
 
         # Loss measures decoder ability to reconstruct the generated examples
-        dec_loss = (MSE_loss(x_hat, x) * beta)  # TODO: insert beta hyperparameters
+        dec_loss = (MSE_loss(x_hat, x) * beta)
         dec_loss.backward(retain_graph=True)
         optimizer_Dec.step()
 
@@ -251,7 +246,7 @@ for epoch in range(opt.n_epochs):
         y_hat = classifier(x_tilde)
 
         # Measure classifier's ability to classify real Y from generated samples' Y_hat
-        cla_loss = (CES_loss(y_hat, labels) * alpha)  # TODO: insert alpha hyperparameters
+        cla_loss = (MSE_loss(y_hat, y) * alpha)
         cla_loss.backward(retain_graph=True)
         optimizer_C.step()
 
@@ -266,7 +261,7 @@ for epoch in range(opt.n_epochs):
         z_hat = discriminator(x_tilde)
 
         # Measure discriminator's ability to discrimante real Z from generated samples' Z_hat
-        dis_loss = (BCE_loss(z_hat, z) * gamma)  # TODO: insert gamma hyperparameters
+        dis_loss = (BCE_loss(z_hat, z) * gamma)
 
         dis_loss.backward(retain_graph=True)
         optimizer_Dis.step()
@@ -292,11 +287,14 @@ for epoch in range(opt.n_epochs):
     time_taken = end_time - start_time
 
     # Accuracy Classifier
-    matches_cla = [torch.argmax(i) == torch.argmax(j) for i, j in zip(y_hat, y)]
+    X_hat = encoder(Tensor(np.c_[X, Z])).detach()
+    Y_hat = classifier(X_hat).detach()
+    matches_cla = [torch.argmax(i) == torch.argmax(j) for i, j in zip(Y_hat, Tensor(Y))]
     acc_cla = matches_cla.count(True) / len(matches_cla)
 
     # Accuracy Discriminator
-    matches_dis = [(i > 0.5) == j for i, j in zip(z_hat, z)]
+    Z_hat = discriminator(X_hat).detach()
+    matches_dis = [(i > 0.5) == j for i, j in zip(Z_hat, Tensor(Z))]
     acc_dis = matches_dis.count(True) / len(matches_dis)
 
     print(

@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 import torch.nn as nn
 import torch
 
-from load_compas_data import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=1000,
@@ -24,8 +23,6 @@ parser.add_argument("--p_dropout", type=float, default=0.2,
                     help="probability of activation unit dropout in layers")
 parser.add_argument("--n_cpu", type=int, default=4,
                     help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=8,
-                    help="dimensionality of the latent code")
 parser.add_argument("--alpha_value", type=float, default=1,
                     help="alpha regularizer for classification utility")
 parser.add_argument("--beta_value", type=float, default=1,
@@ -38,18 +35,26 @@ opt = parser.parse_args()
 print(opt)
 
 SEED = 1234
-seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)  # for reproducibility
 
-X, Y, Z = load_compas_data()
+# Load Data
+npzfile = np.load('data/adult.npz')
 
+X = np.concatenate([npzfile['x_train'], npzfile['x_test']])
+print('X dimensions:', X.shape)
 
-ds = np.c_[X, Z['race'], Y]
+Z = np.concatenate([npzfile['attr_train'], npzfile['attr_test']])
+print('Z dimensions:', Z.shape)
 
-# Y is "two_year_recid"
-# X are ['age_cat_25 - 45', 'age_cat_Greater than 45', 'age_cat_Less than 25', 'race', 'sex', 'priors_count', 'c_charge_degree']
-# Z is 'race' 0 White; 1 Black
+Y = np.concatenate([npzfile['y_train'], npzfile['y_test']])
+print('Y dimensions:', Y.shape)
+
+ds = np.c_[X, Z, Y]
+
+# Y is 'income'
+# X are 13 'age', 'workclass', 'education', 'education-num,marital-status', 'occupation', 'relationship','race', 'capital-gain', 'capital-loss', 'hours-per-week', 'native-country'
+# Z is 'sex'
 
 cuda = True if torch.cuda.is_available() else False
 
@@ -60,10 +65,10 @@ else:
     device = torch.device('cpu')
 
 # Model Saved PATH
-saved_models = torch.load(f"./saved_models/compas-alpha_{opt.alpha_value}-beta_{opt.beta_value}-gamma_{opt.gamma_value}.pt", map_location=device)
+saved_models = torch.load(f"./saved_models/adult-alpha_{opt.alpha_value}-beta_{opt.beta_value}-gamma_{opt.gamma_value}.pt", map_location=device)
 
 
-class DatasetCompas(Dataset):
+class DatasetAdult(Dataset):
     def __init__(self, ds):
         self.data = ds
 
@@ -71,14 +76,14 @@ class DatasetCompas(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        X = self.data[:, 0:-1]  # all expect last column Y
-        Z = self.data[:, -2]  # only penultimate column Z
-        Y = self.data[:, -1]  # only last column Y
+        X = self.data[:, 0:-2]  # all expect last two columns Y
+        Z = self.data[:, -3]  # only third to last column Z
+        Y = self.data[:, -2:]  # only last two columns Y
         sample = {'X': X, 'Z': Z, 'Y': Y}
         return sample
 
 
-train_dataset = DatasetCompas(ds)
+train_dataset = DatasetAdult(ds)
 
 
 class Encoder(nn.Module):
@@ -86,9 +91,9 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(7, 8),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(8, 7),
+            nn.Linear(8, 113),
         )
 
     def forward(self, x):
@@ -101,9 +106,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(8, 8),
+            nn.Linear(114, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(8, 7),
+            nn.Linear(8, 113),
         )
 
     def forward(self, x):
@@ -116,10 +121,10 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(7, 8),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(8, 1),
-            nn.Sigmoid(),
+            nn.Linear(8, 2),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -132,10 +137,10 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(7, 8),
+            nn.Linear(113, 8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(8, 1),
-            nn.Sigmoid(),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -146,7 +151,6 @@ class Discriminator(nn.Module):
 # Loss functions
 BCE_loss = torch.nn.BCELoss()
 MSE_loss = torch.nn.MSELoss()
-CrossEntropy_loss = torch.nn.CrossEntropyLoss()
 
 # Initialize networks and load models parameters
 encoder = Encoder()
@@ -170,7 +174,6 @@ if cuda:
     discriminator.cuda()
     BCE_loss.cuda()
     MSE_loss.cuda()
-    CrossEntropy_loss.cuda()
 
 # Optimizers loaded from saved models
 optimizer_E = torch.optim.Adam(encoder.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -197,14 +200,12 @@ decoder.eval()
 classifier.eval()
 discriminator.eval()
 
-
 x = Tensor(train_dataset['data']['X'])
 z = Tensor(train_dataset['data']['Z'])
 y = Tensor(train_dataset['data']['Y'])
 
-# adding an extra dimension to Z and Y (M, 1)
+# adding an extra dimension to Z (M, 1)
 z = z.unsqueeze_(-1)
-y = y.unsqueeze_(-1)
 
 if cuda:
     x = x.cuda()
@@ -220,9 +221,8 @@ y_hat = classifier(x_tilde)
 # Discriminate x_tilde for Z
 z_hat = discriminator(x_tilde)
 
-
 # Classify
-matches_cla = [(i > 0.5) == j for i, j in zip(y_hat, y)]
+matches_cla = [torch.argmax(i) == torch.argmax(j) for i, j in zip(y_hat, y)]
 acc_cla = matches_cla.count(True) / len(matches_cla)
 
 # Discriminator
