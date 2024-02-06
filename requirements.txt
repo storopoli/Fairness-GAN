@@ -2,7 +2,7 @@ asn1crypto==1.0.1
 certifi==2023.7.22
 cffi==1.12.3
 chardet==3.0.4
-cryptography==41.0.6
+cryptography==42.0.0
 cycler==0.10.0
 idna==2.8
 joblib==1.2.0
